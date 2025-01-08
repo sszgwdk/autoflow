@@ -222,6 +222,10 @@ class ChatRepo(BaseRepo):
         return stats
     
     def list_chat_origins(self, session: Session):
-        return session.exec(select(Chat.origin, Chat.id).order_by(Chat.created_at.desc()))
+        return session.exec(
+            select(Chat.origin, Chat.id)
+            .distinct()
+            .order_by(Chat.created_at.desc())
+        )
 
 chat_repo = ChatRepo()
