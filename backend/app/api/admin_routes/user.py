@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends
-from fastapi_pagination import Params, Page
-from fastapi_pagination.ext.sqlmodel import paginate
+from fastapi_pagination import Params
 from sqlmodel import select
 
 from app.api.deps import SessionDep, CurrentSuperuserDep

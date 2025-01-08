@@ -8,7 +8,7 @@ from sqlmodel import select
 
 from app.api.deps import CurrentSuperuserDep, SessionDep
 from app.repositories import chat_repo
-from app.models import Chat, Feedback
+from app.models import Feedback
 from app.models.base import UUIDBaseModel
 
 from app.repositories import chat_repo

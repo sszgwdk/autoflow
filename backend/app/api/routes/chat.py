@@ -11,8 +11,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import StreamingResponse
 from fastapi_pagination import Params, Page
 
-from sqlmodel import select
-
 from app.api.deps import SessionDep, OptionalUserDep, CurrentUserDep
 from app.rag.chat_config import ChatEngineConfig
 from app.repositories import chat_repo
