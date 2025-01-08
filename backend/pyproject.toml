@@ -58,6 +58,8 @@ dependencies = [
     "retry>=0.9.2",
     "langchain-openai>=0.2.9",
     "ragas>=0.2.6",
+    "fuzzywuzzy>=0.18.0",
+    "levenshtein>=0.26.1",
 ]
 readme = "README.md"
 requires-python = ">= 3.8"

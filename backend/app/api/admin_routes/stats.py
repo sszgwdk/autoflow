@@ -11,6 +11,8 @@ from app.repositories import chat_repo
 from app.models import Chat, Feedback
 from app.models.base import UUIDBaseModel
 
+from app.repositories import chat_repo
+
 router = APIRouter()
 
 
@@ -46,19 +48,18 @@ def list_chat_origins(
     session: SessionDep,
     user: CurrentSuperuserDep,
     params: Params = Depends(),
-) -> Page[ChatOrigin]:
-    return paginate(
-        session,
-        select(Chat.origin, Chat.id).order_by(Chat.created_at.desc()),
-        params,
-        transformer=lambda items: [
+) -> list[ChatOrigin]:
+    chat_origins = []
+    # chats = session.exec(select(Chat.origin, Chat.id).order_by(Chat.created_at.desc()))
+    for chat in chat_repo.list_chat_origins(session):
+        chat_origins.append(
             ChatOrigin(
-                id=item.id,
-                origin=item.origin,
+                id=chat.id,
+                origin=chat.origin,
             )
-            for item in items
-        ],
-    )
+        )
+    return chat_origins
+
 
 @router.get("/admin/stats/feedbacks/origins")
 def list_feedback_origins(
