@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends
-from fastapi_pagination import Params
+from fastapi_pagination import Params, Page
+from fastapi_pagination.ext.sqlmodel import paginate
 from sqlmodel import select, col
 
 from app.api.deps import SessionDep, CurrentSuperuserDep
@@ -18,15 +19,19 @@ def search_users(
     user: CurrentSuperuserDep,
     search: str | None = None,
     params: Params = Depends(),
-) -> list[UserDescriptor]:
+) -> Page[UserDescriptor]:
     query = select(User).order_by(User.id)
     if search:
         query = query.where(col(User.email).contains(search))
-    users = session.exec(query).all()
-    return [
-        UserDescriptor(
-            id=user.id,
-            email=user.email
-        )
-        for user in users
-    ]
+    return paginate(
+        session,
+        query,
+        params,
+        transformer=lambda items: [
+            UserDescriptor(
+                id=item.id,
+                email=item.email,
+            )
+            for item in items
+        ],
+    )

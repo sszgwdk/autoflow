@@ -36,3 +36,7 @@ class ChatEngineDescriptor(BaseModel):
     id: int
     name: str
     is_default: bool
+
+class ChatOriginDescriptor(BaseModel):
+    id: UUID
+    origin: str
