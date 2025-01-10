@@ -1,11 +1,10 @@
 import os
 import logging
-from typing import Optional
+from typing import Dict, Optional
 
 import dspy
 from llama_index.llms.bedrock.utils import BEDROCK_FOUNDATION_LLMS
 from pydantic import BaseModel
-from llama_index.llms.openai.utils import DEFAULT_OPENAI_API_BASE
 from llama_index.llms.openai import OpenAI
 from llama_index.llms.openai_like import OpenAILike
 from llama_index.llms.gemini import Gemini
@@ -17,9 +16,12 @@ from llama_index.core.postprocessor.types import BaseNodePostprocessor
 from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.embeddings.jinaai import JinaEmbedding
 from llama_index.embeddings.cohere import CohereEmbedding
+from llama_index.embeddings.bedrock import BedrockEmbedding
 from llama_index.embeddings.ollama import OllamaEmbedding
 from llama_index.postprocessor.jinaai_rerank import JinaRerank
 from llama_index.postprocessor.cohere_rerank import CohereRerank
+from llama_index.postprocessor.xinference_rerank import XinferenceRerank
+from llama_index.postprocessor.bedrock_rerank import AWSBedrockRerank
 from sqlmodel import Session
 from google.oauth2 import service_account
 from google.auth.transport.requests import Request
@@ -29,6 +31,7 @@ from app.rag.node_postprocessor import MetadataPostFilter
 from app.rag.node_postprocessor.metadata_post_filter import MetadataFilters
 from app.rag.node_postprocessor.baisheng_reranker import BaishengRerank
 from app.rag.node_postprocessor.local_reranker import LocalRerank
+from app.rag.node_postprocessor.vllm_reranker import VLLMRerank
 from app.rag.embeddings.local_embedding import LocalEmbedding
 from app.repositories import chat_engine_repo, knowledge_base_repo
 from app.repositories.embedding_model import embed_model_repo
@@ -81,7 +84,7 @@ class KnowledgeGraphOption(BaseModel):
     include_meta: bool = True
     with_degree: bool = False
     using_intent_search: bool = True
-    relationship_meta_filters: Optional[dict] = None
+    relationship_meta_filters: Optional[Dict] = None
 
 
 class ExternalChatEngine(BaseModel):
@@ -175,13 +178,18 @@ class ChatEngineConfig(BaseModel):
         llama_llm = self.get_fast_llama_llm(session)
         return get_dspy_lm_by_llama_llm(llama_llm)
 
-    def get_reranker(self, session: Session) -> Optional[BaseNodePostprocessor]:
+    # FIXME: Reranker top_n should be config in the retrival config.
+    def get_reranker(
+        self, session: Session, top_n: int = None
+    ) -> Optional[BaseNodePostprocessor]:
         if not self._db_reranker:
-            return get_default_reranker_model(session)
+            return get_default_reranker_model(session, top_n)
+
+        top_n = self._db_reranker.top_n if top_n is None else top_n
         return get_reranker_model(
             self._db_reranker.provider,
             self._db_reranker.model,
-            self._db_reranker.top_n,
+            top_n,
             self._db_reranker.config,
             self._db_reranker.credentials,
         )
@@ -213,18 +221,14 @@ def get_llm(
 ) -> LLM:
     match provider:
         case LLMProvider.OPENAI:
-            api_base = config.pop("api_base", DEFAULT_OPENAI_API_BASE)
             return OpenAI(
                 model=model,
-                api_base=api_base,
                 api_key=credentials,
                 **config,
             )
         case LLMProvider.OPENAI_LIKE:
-            llm = OpenAILike(model=model, api_key=credentials, **config)
-            if not config.get("context_window"):
-                llm.context_window = 200 * 1000
-            return llm
+            config.setdefault("context_window", 200 * 1000)
+            return OpenAILike(model=model, api_key=credentials, **config)
         case LLMProvider.GEMINI:
             os.environ["GOOGLE_API_KEY"] = credentials
             return Gemini(model=model, api_key=credentials, **config)
@@ -243,6 +247,7 @@ def get_llm(
                 aws_secret_access_key=secret_access_key,
                 region_name=region_name,
                 context_size=context_size,
+                **config,
             )
             # Note: Because llama index Bedrock class doesn't set up these values to the corresponding
             # attributes in its constructor function, we pass the values again via setter to pass them to
@@ -266,6 +271,14 @@ def get_llm(
             config.setdefault("request_timeout", 60 * 10)
             config.setdefault("context_window", 4096)
             return Ollama(model=model, **config)
+        case LLMProvider.GITEEAI:
+            config.setdefault("context_window", 200 * 1000)
+            return OpenAILike(
+                model=model,
+                api_base="https://ai.gitee.com/v1",
+                api_key=credentials,
+                **config,
+            )
         case _:
             raise ValueError(f"Got unknown LLM provider: {provider}")
 
@@ -303,10 +316,8 @@ def get_embed_model(
 ) -> BaseEmbedding:
     match provider:
         case EmbeddingProvider.OPENAI:
-            api_base = config.pop("api_base", DEFAULT_OPENAI_API_BASE)
             return OpenAIEmbedding(
                 model=model,
-                api_base=api_base,
                 api_key=credentials,
                 **config,
             )
@@ -320,6 +331,15 @@ def get_embed_model(
             return CohereEmbedding(
                 model_name=model,
                 cohere_api_key=credentials,
+                **config,
+            )
+        case EmbeddingProvider.BEDROCK:
+            return BedrockEmbedding(
+                model_name=model,
+                aws_access_key_id=credentials["aws_access_key_id"],
+                aws_secret_access_key=credentials["aws_secret_access_key"],
+                region_name=credentials["aws_region_name"],
+                **config,
             )
         case EmbeddingProvider.OLLAMA:
             return OllamaEmbedding(
@@ -331,11 +351,16 @@ def get_embed_model(
                 model=model,
                 **config,
             )
-        case EmbeddingProvider.OPENAI_LIKE:
-            api_base = config.pop("api_base", "https://open.bigmodel.cn/api/paas/v4")
+        case EmbeddingProvider.GITEEAI:
             return OpenAILikeEmbedding(
                 model=model,
-                api_base=api_base,
+                api_base="https://ai.gitee.com/v1",
+                api_key=credentials,
+                **config,
+            )
+        case EmbeddingProvider.OPENAI_LIKE:
+            return OpenAILikeEmbedding(
+                model=model,
                 api_key=credentials,
                 **config,
             )
@@ -381,12 +406,14 @@ def get_reranker_model(
                 model=model,
                 top_n=top_n,
                 api_key=credentials,
+                **config,
             )
         case RerankerProvider.COHERE:
             return CohereRerank(
                 model=model,
                 top_n=top_n,
                 api_key=credentials,
+                **config,
             )
         case RerankerProvider.BAISHENG:
             return BaishengRerank(
@@ -401,18 +428,43 @@ def get_reranker_model(
                 top_n=top_n,
                 **config,
             )
+        case RerankerProvider.VLLM:
+            return VLLMRerank(
+                model=model,
+                top_n=top_n,
+                **config,
+            )
+        case RerankerProvider.XINFERENCE:
+            return XinferenceRerank(
+                model=model,
+                top_n=top_n,
+                **config,
+            )
+        case RerankerProvider.BEDROCK:
+            return AWSBedrockRerank(
+                rerank_model_name=model,
+                top_n=top_n,
+                aws_access_key_id=credentials["aws_access_key_id"],
+                aws_secret_access_key=credentials["aws_secret_access_key"],
+                region_name=credentials["aws_region_name"],
+                **config,
+            )
         case _:
             raise ValueError(f"Got unknown reranker provider: {provider}")
 
 
-def get_default_reranker_model(session: Session) -> Optional[BaseNodePostprocessor]:
+# FIXME: Reranker top_n should be config in the retrival config.
+def get_default_reranker_model(
+    session: Session, top_n: int = None
+) -> Optional[BaseNodePostprocessor]:
     db_reranker = reranker_model_repo.get_default(session)
     if not db_reranker:
         return None
+    top_n = db_reranker.top_n if top_n is None else top_n
     return get_reranker_model(
         db_reranker.provider,
         db_reranker.model,
-        db_reranker.top_n,
+        top_n,
         db_reranker.config,
         db_reranker.credentials,
     )

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
 
 from app.api.routes import (
@@ -7,6 +7,7 @@ from app.api.routes import (
     user,
     api_key,
     feedback,
+    document,
 )
 from app.api.admin_routes.knowledge_base.routes import (
     router as admin_knowledge_base_router,
@@ -45,7 +46,6 @@ from app.api.admin_routes.evaluation import (
 )
 
 from app.auth.users import auth_backend, fastapi_users
-from app.api.deps import current_superuser
 
 api_router = APIRouter()
 api_router.include_router(index.router, tags=["index"])
@@ -53,6 +53,7 @@ api_router.include_router(chat.router, tags=["chat"])
 api_router.include_router(feedback.router, tags=["chat"])
 api_router.include_router(user.router, tags=["user"])
 api_router.include_router(api_key.router, tags=["auth"])
+api_router.include_router(document.router, tags=["documents"])
 api_router.include_router(admin_chat_engine.router, tags=["admin/chat_engine"])
 api_router.include_router(admin_document_router, tags=["admin/documents"])
 api_router.include_router(admin_feedback.router, tags=["admin/feedback"])

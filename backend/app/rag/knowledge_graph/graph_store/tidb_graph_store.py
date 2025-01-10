@@ -49,6 +49,7 @@ class MergeEntities(dspy.Signature):
     If the entities are distinct despite their same name that may be due to different contexts or perspectives, do not merge the entities and return none as the merged entity.
 
     Considerations: Ensure your decision is based on a comprehensive analysis of the content and context provided within the entity descriptions and metadata.
+    Please only response in JSON Format.
     """
 
     entities: List[Entity] = dspy.InputField(
@@ -211,6 +212,7 @@ class TiDBGraphStore(KnowledgeGraphStore):
                         description=row["description"],
                         metadata=row["meta"],
                     ),
+                    commit=False,
                 )
             )
 
@@ -233,28 +235,41 @@ class TiDBGraphStore(KnowledgeGraphStore):
                     description=description,
                     metadata={"status": "need-revised"},
                 ),
-            )
-
-        for _, row in relationships_df.iterrows():
-            source_entity = _find_or_create_entity_for_relation(
-                row["source_entity"], row["source_entity_description"]
-            )
-            target_entity = _find_or_create_entity_for_relation(
-                row["target_entity"], row["target_entity_description"]
-            )
-
-            self.create_relationship(
-                source_entity,
-                target_entity,
-                Relationship(
-                    source_entity=source_entity.name,
-                    target_entity=target_entity.name,
-                    relationship_desc=row["relationship_desc"],
-                ),
-                relationship_metadata=row["meta"],
                 commit=False,
             )
-        self._session.commit()
+
+        try:
+            for _, row in relationships_df.iterrows():
+                logger.info(
+                    "save entities for relationship %s -> %s -> %s",
+                    row["source_entity"],
+                    row["relationship_desc"],
+                    row["target_entity"],
+                )
+                source_entity = _find_or_create_entity_for_relation(
+                    row["source_entity"], row["source_entity_description"]
+                )
+                target_entity = _find_or_create_entity_for_relation(
+                    row["target_entity"], row["target_entity_description"]
+                )
+
+                self.create_relationship(
+                    source_entity,
+                    target_entity,
+                    Relationship(
+                        source_entity=source_entity.name,
+                        target_entity=target_entity.name,
+                        relationship_desc=row["relationship_desc"],
+                    ),
+                    relationship_metadata=row["meta"],
+                    commit=False,
+                )
+
+            self._session.commit()
+        except Exception as e:
+            logger.error(e, exc_info=True)
+            self._session.rollback()
+            raise e
 
     def create_relationship(
         self,
@@ -283,8 +298,11 @@ class TiDBGraphStore(KnowledgeGraphStore):
         self._session.add(relationship_object)
         if commit:
             self._session.commit()
+            self._session.refresh(relationship_object)
+        else:
+            self._session.flush()
 
-    def get_or_create_entity(self, entity: Entity) -> SQLModel:
+    def get_or_create_entity(self, entity: Entity, commit: bool = True) -> SQLModel:
         # using the cosine distance between the description vectors to determine if the entity already exists
         entity_type = (
             EntityType.synopsis
@@ -347,8 +365,13 @@ class TiDBGraphStore(KnowledgeGraphStore):
                     db_obj.meta_vec = get_entity_metadata_embedding(
                         db_obj.meta, self._embed_model
                     )
-                    self._session.commit()
-                    self._session.refresh(db_obj)
+
+                    self._session.add(db_obj)
+                    if commit:
+                        self._session.commit()
+                        self._session.refresh(db_obj)
+                    else:
+                        self._session.flush()
                     return db_obj
 
         synopsis_info_str = (
@@ -367,15 +390,23 @@ class TiDBGraphStore(KnowledgeGraphStore):
             entity_type=entity_type,
         )
         self._session.add(db_obj)
-        self._session.commit()
-        self._session.refresh(db_obj)
+        if commit:
+            self._session.commit()
+            self._session.refresh(db_obj)
+        else:
+            self._session.flush()
+
         return db_obj
 
     def _try_merge_entities(self, entities: List[Entity]) -> Entity:
         logger.info(f"Trying to merge entities: {entities[0].name}")
-        with dspy.settings.context(lm=self._dspy_lm):
-            pred = self.merge_entities_prog(entities=entities)
-            return pred.merged_entity
+        try:
+            with dspy.settings.context(lm=self._dspy_lm):
+                pred = self.merge_entities_prog(entities=entities)
+                return pred.merged_entity
+        except Exception as e:
+            logger.error(f"Failed to merge entities: {e}", exc_info=True)
+            return None
 
     def retrieve_with_weight(
         self,
@@ -386,7 +417,7 @@ class TiDBGraphStore(KnowledgeGraphStore):
         with_degree: bool = False,
         with_chunks: bool = True,
         # experimental feature to filter relationships based on meta, can be removed in the future
-        relationship_meta_filters: Dict = {},
+        relationship_meta_filters: dict = {},
         session: Optional[Session] = None,
     ) -> Tuple[list, list, list]:
         if not embedding:
@@ -945,7 +976,7 @@ class TiDBGraphStore(KnowledgeGraphStore):
                 neighbors.append(
                     {
                         "id": rel.id,
-                        "description": rel.description,
+                        "relationship": rel.description,
                         "source_entity": {
                             "id": rel.source_entity.id,
                             "name": rel.source_entity.name,
@@ -1010,6 +1041,17 @@ class TiDBGraphStore(KnowledgeGraphStore):
         ).all()
 
         return [
-            {"text": chunk.text, "document_id": chunk.document_id, "meta": chunk.meta}
+            {
+                "id": chunk.id,
+                "text": chunk.text,
+                "document_id": chunk.document_id,
+                "meta": {
+                    "language": chunk.meta.get("language"),
+                    "product": chunk.meta.get("product"),
+                    "resource": chunk.meta.get("resource"),
+                    "source_uri": chunk.meta.get("source_uri"),
+                    "tidb_version": chunk.meta.get("tidb_version"),
+                },
+            }
             for chunk in chunks
         ]

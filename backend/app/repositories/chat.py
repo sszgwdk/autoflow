@@ -212,8 +212,8 @@ class ChatRepo(BaseRepo):
             origins.add(row.origin)
 
         stats = []
-        for date, origin_counts in date_origin_counts.items():
-            stat = {"date": date}
+        for d, origin_counts in date_origin_counts.items():
+            stat = {"date": d}
             for origin in origins:
                 stat[origin] = origin_counts[origin]
             stats.append(stat)

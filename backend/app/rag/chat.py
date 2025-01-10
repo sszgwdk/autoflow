@@ -113,7 +113,7 @@ class ChatService:
             #   anonymous user can only access anonymous chat by track_id
             self.db_chat_obj = chat_repo.get(self.db_session, chat_id)
             if not self.db_chat_obj:
-                raise ChatNotFound()
+                raise ChatNotFound(chat_id)
             try:
                 self.chat_engine_config = ChatEngineConfig.load_from_db(
                     db_session, self.db_chat_obj.engine.name
@@ -461,6 +461,7 @@ class ChatService:
                         graph_knowledges=graph_knowledges_context,
                         chat_history=self.chat_history,
                         question=self.user_question,
+                        current_date=datetime.now().strftime("%Y-%m-%d"),
                     ),
                 )
                 event.on_end(payload={EventPayload.COMPLETION: refined_question})
@@ -833,7 +834,7 @@ class ChatService:
                 goal = clean_goal
                 # todo: temporary add this to response_format, need to remove it later
                 response_format["Include SQLs Example Section"] = (
-                    "If the answer contains some SQL operations, please feel free to provide a example SQLs at the end of the answer, which can provide better understanding for the user."
+                    "If (and only if) the answer contains SQL operations, please feel free to provide a example section at the end of the answer, which can provide better understanding for the user."
                 )
         except Exception as e:
             logger.error(f"Failed to parse goal and response format: {e}")
@@ -919,7 +920,7 @@ class ChatService:
             db_assistant_message.post_verification_result_url = (
                 post_verification_result_url
             )
-        except Exception as e:
+        except Exception:
             logger.error(
                 "Specific error occurred during post verification job.", exc_info=True
             )

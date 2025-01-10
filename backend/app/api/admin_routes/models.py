@@ -1,4 +1,5 @@
 from uuid import UUID
+from typing import Optional
 from pydantic import BaseModel
 
 from app.api.admin_routes.embedding_model.models import EmbeddingModelItem
@@ -40,3 +41,11 @@ class ChatEngineDescriptor(BaseModel):
 class ChatOriginDescriptor(BaseModel):
     id: UUID
     origin: str
+
+class ChatEngineBasedRetrieveRequest(BaseModel):
+    query: str
+    chat_engine: Optional[str] = "default"
+    top_k: Optional[int] = 5
+    similarity_top_k: Optional[int] = None
+    oversampling_factor: Optional[int] = 5
+    enable_kg_enchance_query_refine: Optional[bool] = True
