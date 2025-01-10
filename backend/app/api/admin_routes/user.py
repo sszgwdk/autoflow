@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from fastapi_pagination import Params
-from sqlmodel import select
+from sqlmodel import select, col
 
 from app.api.deps import SessionDep, CurrentSuperuserDep
 from app.models import User
@@ -21,8 +21,7 @@ def search_users(
 ) -> list[UserDescriptor]:
     query = select(User).order_by(User.id)
     if search:
-        search_pattern = f"%{search}%"
-        query = query.where(User.email.ilike(search_pattern))
+        query = query.where(col(User.email).contains(search))
     users = session.exec(query).all()
     return [
         UserDescriptor(
