@@ -172,8 +172,9 @@ class ChatService:
 
         self._reranker = self.chat_engine_config.get_reranker(db_session)
         self._metadata_filter = self.chat_engine_config.get_metadata_filter()
+        self._ragtrim = self.chat_engine_config.get_ragtrim()
         if self._reranker:
-            self._node_postprocessors = [self._metadata_filter, self._reranker]
+            self._node_postprocessors = [self._metadata_filter, self._reranker, self._ragtrim]
             # Set initial similarity_top_k to a large number,
             # reranker will filter out irrelevant nodes after the retrieval
             self._similarity_top_k = 60

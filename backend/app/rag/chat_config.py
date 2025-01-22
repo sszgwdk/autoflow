@@ -12,7 +12,7 @@ from app.utils.dspy import get_dspy_lm_by_llama_llm
 from app.rag.llms.resolver import get_default_llm, get_llm
 from app.rag.rerankers.resolver import get_default_reranker_model, get_reranker_model
 from app.rag.postprocessors import get_metadata_post_filter, MetadataFilters
-
+from app.rag.rag_trim.ragtrim_post_processor import RagTrimPostprocessor
 
 from app.models import (
     ChatEngine as DBChatEngine,
@@ -180,4 +180,10 @@ class ChatEngineConfig(BaseModel):
                 ],
                 "post_verification_token": True,
             }
+        )
+    
+    def get_ragtrim(self) -> BaseNodePostprocessor:
+        return RagTrimPostprocessor(
+            use_kv_cache=True,
+            prefetch=True
         )
