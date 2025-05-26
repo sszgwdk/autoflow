@@ -66,10 +66,16 @@ class KnowledgeBase(BaseComponent):
         from pytidb import TiDBClient
 
         self._tidb_client = TiDBClient(self._db_engine)
+
+        use_full_text_search = False
+        if IndexMethod.FULLTEXT_SEARCH in self.index_methods:
+            use_full_text_search = True
+
         self._doc_store = TiDBDocumentStore(
             client=self._tidb_client,
             embedding_model=self._embedding_model,
             namespace=self.namespace,
+            use_full_text_search=use_full_text_search,
         )
         self._kg_store = TiDBGraphStore(
             client=self._tidb_client,

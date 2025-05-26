@@ -17,7 +17,7 @@ dependencies = [
     "llama-index-llms-litellm>=0.3.0",
     "llama-index-readers-file>=0.4.6",
     "deepdiff>=8.2.0",
-    "pytidb==0.0.4.dev1",
+    "pytidb==0.0.5",
     "markdownify>=0.13.1",
     "playwright>=1.20.0",
     "dspy>=2.6.6",

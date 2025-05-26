@@ -113,11 +113,13 @@ class TiDBDocumentStore(DocumentStore):
         namespace: Optional[str] = None,
         embedding_model: Optional[EmbeddingModel] = None,
         vector_dims: Optional[int] = None,
+        use_full_text_search: bool = False,
     ) -> None:
         super().__init__()
         self._client = client
         self._db_engine = self._client.db_engine
         self._embedding_model = embedding_model
+        self._use_full_text_search = use_full_text_search
         self._init_store(namespace, vector_dims)
 
     @classmethod
@@ -134,6 +136,8 @@ class TiDBDocumentStore(DocumentStore):
         )
         self._document_table = self._client.create_table(schema=self._document_db_model)
         self._chunk_table = self._client.create_table(schema=self._chunk_db_model)
+        if self._use_full_text_search:
+            self._chunk_table.create_fts_index("text")
 
     # Document Operations.
 
@@ -201,22 +205,34 @@ class TiDBDocumentStore(DocumentStore):
         num_candidate: Optional[int] = None,
         full_document: Optional[bool] = None,
     ) -> DocumentSearchResult:
-        # TODO: Support Fulltext search.
         # TODO: Support Hybrid search.
-        if mode != "vector":
+        if mode != "vector" and mode != "fulltext":
             raise NotImplementedError(
-                ".search() only supports vector search currently, fulltext and hybird search will be coming soon."
+                ".search() only supports vector and fulltext search currently, hybird search will be coming soon."
             )
+        
+        if mode == "fulltext" or mode == "hybrid":
+            if not self._use_full_text_search:
+                raise ValueError(
+                    "Fulltext search is not enabled. Please use `IndexMethod.FULLTEXT_SEARCH` when initializing the knowledge base."
+                )
 
-        db_chunks = (
-            self._chunk_table.search(query, query_type=SearchType.VECTOR_SEARCH)
-            .distance_threshold(
-                (1 - similarity_threshold) if similarity_threshold is not None else None
+        if mode == "fulltext":
+            db_chunks = (
+                self._chunk_table.search(query, query_type="fulltext")
+                .limit(top_k)
+                .to_pydantic(with_score=True)
             )
-            .num_candidate(num_candidate)
-            .limit(top_k)
-            .to_pydantic(with_score=True)
-        )
+        else:
+            db_chunks = (
+                self._chunk_table.search(query, query_type="vector")
+                .distance_threshold(
+                    (1 - similarity_threshold) if similarity_threshold is not None else None
+                )
+                .num_candidate(num_candidate)
+                .limit(top_k)
+                .to_pydantic(with_score=True)
+            )
         document_ids = [c.document_id for c in db_chunks]
         db_documents = self.list(
             {
